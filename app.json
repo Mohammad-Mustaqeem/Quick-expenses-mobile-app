@@ -37,6 +37,13 @@
     ],
     "experiments": {
       "typedRoutes": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "1fcb188a-f028-4718-acde-bef40da9a74a"
+      }
+    },
+    "owner": "zainydev"
   }
 }
