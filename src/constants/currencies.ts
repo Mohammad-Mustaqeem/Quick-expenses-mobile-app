@@ -1,0 +1,36 @@
+import { Currency } from '../types';
+
+export const CURRENCIES: Currency[] = [
+  { code: 'INR', symbol: '₹',   name: 'Indian Rupee',          locale: 'en-IN' },
+  { code: 'USD', symbol: '$',   name: 'US Dollar',              locale: 'en-US' },
+  { code: 'EUR', symbol: '€',   name: 'Euro',                   locale: 'de-DE' },
+  { code: 'GBP', symbol: '£',   name: 'British Pound',          locale: 'en-GB' },
+  { code: 'AED', symbol: 'د.إ', name: 'UAE Dirham',             locale: 'en-AE' },
+  { code: 'SAR', symbol: '﷼',   name: 'Saudi Riyal',            locale: 'en-SA' },
+  { code: 'JPY', symbol: '¥',   name: 'Japanese Yen',           locale: 'ja-JP' },
+  { code: 'CNY', symbol: '¥',   name: 'Chinese Yuan',           locale: 'zh-CN' },
+  { code: 'AUD', symbol: 'A$',  name: 'Australian Dollar',      locale: 'en-AU' },
+  { code: 'CAD', symbol: 'C$',  name: 'Canadian Dollar',        locale: 'en-CA' },
+  { code: 'SGD', symbol: 'S$',  name: 'Singapore Dollar',       locale: 'en-SG' },
+  { code: 'HKD', symbol: 'HK$', name: 'Hong Kong Dollar',       locale: 'en-HK' },
+  { code: 'KRW', symbol: '₩',   name: 'South Korean Won',       locale: 'ko-KR' },
+  { code: 'CHF', symbol: 'Fr',  name: 'Swiss Franc',            locale: 'de-CH' },
+  { code: 'MYR', symbol: 'RM',  name: 'Malaysian Ringgit',      locale: 'ms-MY' },
+  { code: 'IDR', symbol: 'Rp',  name: 'Indonesian Rupiah',      locale: 'id-ID' },
+  { code: 'THB', symbol: '฿',   name: 'Thai Baht',              locale: 'th-TH' },
+  { code: 'PHP', symbol: '₱',   name: 'Philippine Peso',        locale: 'en-PH' },
+  { code: 'PKR', symbol: '₨',   name: 'Pakistani Rupee',        locale: 'en-PK' },
+  { code: 'BDT', symbol: '৳',   name: 'Bangladeshi Taka',       locale: 'en-BD' },
+  { code: 'NZD', symbol: 'NZ$', name: 'New Zealand Dollar',     locale: 'en-NZ' },
+  { code: 'BRL', symbol: 'R$',  name: 'Brazilian Real',         locale: 'pt-BR' },
+  { code: 'MXN', symbol: 'MX$', name: 'Mexican Peso',           locale: 'es-MX' },
+  { code: 'ZAR', symbol: 'R',   name: 'South African Rand',     locale: 'en-ZA' },
+  { code: 'NGN', symbol: '₦',   name: 'Nigerian Naira',         locale: 'en-NG' },
+  { code: 'TRY', symbol: '₺',   name: 'Turkish Lira',           locale: 'tr-TR' },
+  { code: 'RUB', symbol: '₽',   name: 'Russian Ruble',          locale: 'ru-RU' },
+  { code: 'NOK', symbol: 'kr',  name: 'Norwegian Krone',        locale: 'nb-NO' },
+  { code: 'SEK', symbol: 'kr',  name: 'Swedish Krona',          locale: 'sv-SE' },
+  { code: 'DKK', symbol: 'kr',  name: 'Danish Krone',           locale: 'da-DK' },
+];
+
+export const DEFAULT_CURRENCY: Currency = CURRENCIES[0]; // INR

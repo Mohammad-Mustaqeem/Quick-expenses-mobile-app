@@ -1,0 +1,26 @@
+# Expo generated
+expo-env.d.ts
+
+# Dependencies
+node_modules/
+
+# Expo local state
+.expo/
+
+# Build output
+dist/
+
+# Environment variables
+.env
+.env.local
+.env*.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# EAS credentials (never commit these)
+play-store-service-account.json
+*.p8
+*.p12
+*.mobileprovision
