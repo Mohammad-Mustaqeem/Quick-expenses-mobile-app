@@ -405,7 +405,7 @@ export default function FileScreen() {
 
             {/* Input row */}
             <View style={styles.inputRow}>
-              <Text style={[styles.indexText, styles.inputIndex]}>
+              <Text style={[styles.indexText, styles.inputIndex, { color: 'rgba(255,255,255,0.75)' }]}>
                 {file.expenses.length + 1}
               </Text>
 
@@ -415,7 +415,7 @@ export default function FileScreen() {
                 value={particular}
                 onChangeText={setParticular}
                 placeholder="Description"
-                placeholderTextColor={colors.textLabel}
+                placeholderTextColor="rgba(255,255,255,0.55)"
                 returnKeyType="next"
                 blurOnSubmit={false}
                 onSubmitEditing={() => amountRef.current?.focus()}
@@ -427,7 +427,7 @@ export default function FileScreen() {
                 value={amount}
                 onChangeText={setAmount}
                 placeholder="0.00"
-                placeholderTextColor={colors.textLabel}
+                placeholderTextColor="rgba(255,255,255,0.55)"
                 keyboardType="decimal-pad"
                 returnKeyType="done"
                 onSubmitEditing={handleAdd}
@@ -441,7 +441,7 @@ export default function FileScreen() {
                 <Ionicons
                   name="return-down-back-outline"
                   size={15}
-                  color={particular.trim() ? colors.textPrimary : colors.textLabel}
+                  color={particular.trim() ? colors.white : 'rgba(255,255,255,0.55)'}
                 />
               </TouchableOpacity>
             </View>
@@ -574,14 +574,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    backgroundColor: colors.bgSurface,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
+    backgroundColor: colors.accent,
+    borderBottomWidth: 0,
   },
   headCell: {
     fontSize: 10,
     fontWeight: typography.weights.semibold,
-    color: colors.accent,
+    color: colors.white,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
@@ -635,11 +634,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    backgroundColor: colors.bgSurface,
+    backgroundColor: colors.accent,
   },
   inputCell: {
     fontSize: typography.sizes.base,
-    color: colors.textPrimary,
+    color: colors.white,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.xs,
   },
