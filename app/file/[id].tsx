@@ -581,7 +581,7 @@ const styles = StyleSheet.create({
   headCell: {
     fontSize: 10,
     fontWeight: typography.weights.semibold,
-    color: colors.textMuted,
+    color: colors.accent,
     textTransform: 'uppercase',
     letterSpacing: 0.6,
   },
