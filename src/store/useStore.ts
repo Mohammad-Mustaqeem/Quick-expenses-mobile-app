@@ -6,8 +6,18 @@ import {
   loadCurrency, saveCurrency,
   isFirstLaunch, markLaunched,
 } from '../services/storage';
+import { deleteAttachment } from '../services/attachments';
 import { DEFAULT_CURRENCY } from '../constants/currencies';
 import { uid } from '../utils/helpers';
+
+const DELETED_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Fire-and-forget removal of every photo attached to a file's expenses. */
+function deleteFileAttachments(file: ExpenseFile): void {
+  for (const expense of file.expenses) {
+    if (expense.photoUri) void deleteAttachment(expense.photoUri);
+  }
+}
 
 interface StoreState {
   files: ExpenseFile[];
@@ -29,8 +39,19 @@ interface StoreState {
   renameFile: (id: string, name: string) => void;
 
   // ── Expenses ───────────────────────────────────────────────────
-  addExpense: (fileId: string, particular: string, amount: number) => void;
-  updateExpense: (fileId: string, expId: string, particular: string, amount: number) => void;
+  addExpense: (
+    fileId: string,
+    particular: string,
+    amount: number,
+    extras?: { note?: string; photoUri?: string }
+  ) => void;
+  updateExpense: (
+    fileId: string,
+    expId: string,
+    particular: string,
+    amount: number,
+    extras?: { note?: string; photoUri?: string }
+  ) => void;
   deleteExpense: (fileId: string, expId: string) => void;
 
   // ── Currency ───────────────────────────────────────────────────
@@ -46,14 +67,47 @@ export const useStore = create<StoreState>((set, get) => ({
   showCurrencyPickerOnLaunch: false,
 
   loadData: async () => {
-    const [files, deletedFiles, currency, firstLaunch] = await Promise.all([
+    const [files, allDeletedFiles, currency, firstLaunch] = await Promise.all([
       loadFiles(),
       loadDeletedFiles(),
       loadCurrency(),
       isFirstLaunch(),
     ]);
+
+    // 30-day retention: prune expired entries from Recently Deleted and
+    // remove their photo attachments from disk so nothing leaks.
+    const cutoff = Date.now() - DELETED_RETENTION_MS;
+    const deletedFiles = allDeletedFiles.filter(
+      f => new Date(f.deletedAt).getTime() > cutoff
+    );
+    if (deletedFiles.length !== allDeletedFiles.length) {
+      allDeletedFiles
+        .filter(f => new Date(f.deletedAt).getTime() <= cutoff)
+        .forEach(deleteFileAttachments);
+      saveDeletedFiles(deletedFiles);
+    }
+
+    // Seed two starter files on the very first launch, only if nothing
+    // is stored yet. Subsequent launches never re-seed, so the user can
+    // freely delete them without them coming back.
+    let seededFiles = files;
+    if (firstLaunch && files.length === 0) {
+      const now = new Date().toISOString();
+      seededFiles = [
+        { id: uid(), name: 'Expense 1', expenses: [], createdAt: now, updatedAt: now },
+        { id: uid(), name: 'Expense 2', expenses: [], createdAt: now, updatedAt: now },
+      ];
+      saveFiles(seededFiles);
+    }
+
     if (firstLaunch) markLaunched(); // fire-and-forget; don't await
-    set({ files, deletedFiles, currency, isLoading: false, showCurrencyPickerOnLaunch: firstLaunch });
+    set({
+      files: seededFiles,
+      deletedFiles,
+      currency,
+      isLoading: false,
+      showCurrencyPickerOnLaunch: firstLaunch,
+    });
   },
 
   getFile: (id) => get().files.find(f => f.id === id),
@@ -94,12 +148,15 @@ export const useStore = create<StoreState>((set, get) => ({
   },
 
   permanentlyDeleteFile: (id) => {
+    const target = get().deletedFiles.find(f => f.id === id);
+    if (target) deleteFileAttachments(target);
     const deletedFiles = get().deletedFiles.filter(f => f.id !== id);
     set({ deletedFiles });
     saveDeletedFiles(deletedFiles);
   },
 
   clearDeletedFiles: () => {
+    get().deletedFiles.forEach(deleteFileAttachments);
     set({ deletedFiles: [] });
     saveDeletedFiles([]);
   },
@@ -114,12 +171,16 @@ export const useStore = create<StoreState>((set, get) => ({
     saveFiles(files);
   },
 
-  addExpense: (fileId, particular, amount) => {
+  addExpense: (fileId, particular, amount, extras) => {
+    const note      = extras?.note?.trim();
+    const photoUri  = extras?.photoUri;
     const expense: Expense = {
       id: uid(),
       particular: particular.trim(),
       amount,
       createdAt: new Date().toISOString(),
+      ...(note     ? { note }     : {}),
+      ...(photoUri ? { photoUri } : {}),
     };
     const files = get().files.map(f =>
       f.id === fileId
@@ -130,13 +191,28 @@ export const useStore = create<StoreState>((set, get) => ({
     saveFiles(files);
   },
 
-  updateExpense: (fileId, expId, particular, amount) => {
+  updateExpense: (fileId, expId, particular, amount, extras) => {
+    const noteTrimmed = extras?.note?.trim();
     const files = get().files.map(f =>
       f.id === fileId
         ? {
             ...f,
             expenses: f.expenses.map(e =>
-              e.id === expId ? { ...e, particular: particular.trim(), amount } : e
+              e.id === expId
+                ? {
+                    ...e,
+                    particular: particular.trim(),
+                    amount,
+                    // When extras is undefined the caller doesn't touch note/photo.
+                    // When extras is present, an empty/undefined field clears it.
+                    ...(extras
+                      ? {
+                          note:     noteTrimmed || undefined,
+                          photoUri: extras.photoUri || undefined,
+                        }
+                      : {}),
+                  }
+                : e
             ),
             updatedAt: new Date().toISOString(),
           }

@@ -31,15 +31,14 @@ export async function saveFiles(files: ExpenseFile[]): Promise<void> {
 }
 
 // ── Recently Deleted ─────────────────────────────────────────────
+// Note: returns ALL stored entries. The 30-day prune lives in the store
+// (loadData) so it can also delete the pruned files' photo attachments.
 export async function loadDeletedFiles(): Promise<DeletedExpenseFile[]> {
   try {
     const data = await AsyncStorage.getItem(KEYS.deletedFiles);
     if (!data) return [];
     const parsed: DeletedExpenseFile[] = JSON.parse(data);
-    if (!Array.isArray(parsed)) return [];
-    // Auto-prune files older than 30 days
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
-    return parsed.filter(f => new Date(f.deletedAt).getTime() > cutoff);
+    return Array.isArray(parsed) ? parsed : [];
   } catch (e) {
     if (__DEV__) console.warn('[storage] loadDeletedFiles:', e);
     return [];

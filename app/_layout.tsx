@@ -1,7 +1,7 @@
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, Component, ReactNode } from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useStore } from '@/store/useStore';
 
@@ -18,6 +18,14 @@ class RootErrorBoundary extends Component<{ children: ReactNode }, EBState> {
         <View style={eb.container}>
           <Text style={eb.title}>Something went wrong</Text>
           <Text style={eb.message}>{this.state.error.message}</Text>
+          <TouchableOpacity
+            style={eb.retryBtn}
+            onPress={() => this.setState({ error: null })}
+            accessibilityRole="button"
+            accessibilityLabel="Try again"
+          >
+            <Text style={eb.retryText}>Try Again</Text>
+          </TouchableOpacity>
         </View>
       );
     }
@@ -28,6 +36,8 @@ const eb = StyleSheet.create({
   container: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, backgroundColor: '#F9F9F9' },
   title:     { fontSize: 18, fontWeight: '600', color: '#1C1C1E', marginBottom: 8 },
   message:   { fontSize: 13, color: '#787776', textAlign: 'center' },
+  retryBtn:  { marginTop: 20, backgroundColor: '#1C1C1E', borderRadius: 12, paddingHorizontal: 28, paddingVertical: 12 },
+  retryText: { fontSize: 15, fontWeight: '600', color: '#FFFFFF' },
 });
 
 function RootLayout() {
@@ -50,6 +60,12 @@ function RootLayout() {
           headerShown: false,
           contentStyle: { backgroundColor: '#F9F9F9' },
           animation: 'slide_from_right',
+          // Edge swipe-back (iOS edge-only by default; the next two flags
+          // make the swipe area cover the full screen on iOS and enable
+          // swipe-back on Android too).
+          gestureEnabled: true,
+          fullScreenGestureEnabled: true,
+          animationTypeForReplace: 'pop',
         }}
       />
     </>

@@ -3,6 +3,8 @@ export interface Expense {
   particular: string;
   amount: number;
   createdAt: string;
+  note?: string;
+  photoUri?: string;
 }
 
 export interface ExpenseFile {

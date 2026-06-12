@@ -15,8 +15,7 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.quickexpenses.app",
-      "buildNumber": "1"
+      "bundleIdentifier": "com.quickexpenses.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -24,7 +23,7 @@
         "backgroundColor": "#F9F9F9"
       },
       "package": "com.quickexpenses.app",
-      "versionCode": 1
+      "softwareKeyboardLayoutMode": "resize"
     },
     "web": {
       "bundler": "metro",
@@ -33,7 +32,14 @@
     "plugins": [
       "expo-router",
       "expo-font",
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow QuickExpenses to attach photos to your expense entries.",
+          "cameraPermission": "Allow QuickExpenses to take photos for your expense entries."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true

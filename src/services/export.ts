@@ -1,10 +1,33 @@
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import * as FileSystem from 'expo-file-system/legacy';
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const FS = FileSystem as any;
+import JSZip from 'jszip';
 import { Currency, Expense, ExpenseFile } from '../types';
 import { formatCurrency, fileTotal, formatDate, formatDateTime } from '../utils/helpers';
+
+type CurrencyFormat = Pick<Currency, 'symbol' | 'locale'>;
+
+const safeFileName = (name: string): string =>
+  name.replace(/[^a-z0-9_\-\s]/gi, '').replace(/\s+/g, '_').slice(0, 80) || 'expense_file';
+
+const escapeHtml = (s: string): string =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/**
+ * Quote a CSV cell and neutralize spreadsheet formula injection: a leading
+ * =, +, - or @ makes Excel/Sheets execute the cell as a formula, so prefix
+ * those with an apostrophe (rendered invisibly by spreadsheet apps).
+ */
+const csvCell = (s: string): string => {
+  const guarded = /^[=+\-@]/.test(s) ? `'${s}` : s;
+  return `"${guarded.replace(/"/g, '""')}"`;
+};
+
+const cacheDir = (): string => {
+  const dir = FileSystem.cacheDirectory;
+  if (!dir) throw new Error('Cache directory unavailable');
+  return dir;
+};
 
 /**
  * Build a lookup map: expense id → 1-based position in the full list.
@@ -17,27 +40,31 @@ function buildIndexMap(originalExpenses: Expense[]): Map<string, number> {
   return map;
 }
 
-export async function exportToPDF(
+function buildHtml(
   file: ExpenseFile,
-  originalExpenses?: Expense[],
-  currency?: Pick<Currency, 'symbol' | 'locale'>,
-): Promise<void> {
-  const indexMap = buildIndexMap(originalExpenses ?? file.expenses);
-
+  indexMap: Map<string, number>,
+  currency?: CurrencyFormat,
+): string {
   const rows = file.expenses
     .map((e) => {
       const sno = indexMap.get(e.id) ?? '—';
+      const noteRow = e.note
+        ? `<div class="note">${escapeHtml(e.note)}</div>`
+        : '';
       return `
         <tr>
           <td>${sno}</td>
-          <td>${e.particular}</td>
+          <td>
+            <div class="particular">${escapeHtml(e.particular)}</div>
+            ${noteRow}
+          </td>
           <td class="amount">${formatCurrency(e.amount, currency)}</td>
           <td class="datetime">${formatDateTime(e.createdAt)}</td>
         </tr>`;
     })
     .join('');
 
-  const html = `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8">
@@ -51,13 +78,15 @@ export async function exportToPDF(
     td { padding: 11px 14px; border-bottom: 1px solid rgba(60,60,67,0.1); font-size: 14px; vertical-align: top; }
     .amount { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .datetime { font-size: 12px; color: #555; white-space: nowrap; }
+    .particular { font-weight: 500; }
+    .note { font-size: 12px; color: #6e6e73; margin-top: 4px; font-style: italic; line-height: 1.4; }
     .total td { font-weight: 600; background: #F9F9F9; font-size: 15px; }
     th:nth-child(1), td:nth-child(1) { width: 48px; }
     th:last-child, td:last-child { width: 160px; }
   </style>
 </head>
 <body>
-  <h1>${file.name}</h1>
+  <h1>${escapeHtml(file.name)}</h1>
   <p class="meta">${file.expenses.length} expense${file.expenses.length !== 1 ? 's' : ''} &nbsp;·&nbsp; Generated ${formatDate(new Date().toISOString())}</p>
   <table>
     <thead>
@@ -79,7 +108,34 @@ export async function exportToPDF(
   </table>
 </body>
 </html>`;
+}
 
+function buildCsv(file: ExpenseFile, indexMap: Map<string, number>): string {
+  const header = 'No.,Particular,Amount,Note,Date & Time Added\n';
+  const rows = file.expenses
+    .map((e) => {
+      const sno = indexMap.get(e.id) ?? '';
+      return [
+        sno,
+        csvCell(e.particular),
+        e.amount,
+        csvCell(e.note ?? ''),
+        csvCell(formatDateTime(e.createdAt)),
+      ].join(',');
+    })
+    .join('\n');
+  const footer = `\nTotal,,${fileTotal(file.expenses)},,`;
+  return header + rows + footer;
+}
+
+// ── Single-file exports (share sheet) ────────────────────────────
+export async function exportToPDF(
+  file: ExpenseFile,
+  originalExpenses?: Expense[],
+  currency?: CurrencyFormat,
+): Promise<void> {
+  const indexMap = buildIndexMap(originalExpenses ?? file.expenses);
+  const html = buildHtml(file, indexMap, currency);
   const { uri } = await Print.printToFileAsync({ html, base64: false });
   await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: '.pdf' });
 }
@@ -87,25 +143,64 @@ export async function exportToPDF(
 export async function exportToCSV(
   file: ExpenseFile,
   originalExpenses?: Expense[],
-  currency?: Pick<Currency, 'symbol' | 'locale'>,
+  currency?: CurrencyFormat,
 ): Promise<void> {
   const indexMap = buildIndexMap(originalExpenses ?? file.expenses);
-
-  const header = 'No.,Particular,Amount (INR),Date & Time Added\n';
-  const rows = file.expenses
-    .map((e) => {
-      const sno = indexMap.get(e.id) ?? '';
-      return `${sno},"${e.particular.replace(/"/g, '""')}",${e.amount},${formatDateTime(e.createdAt)}`;
-    })
-    .join('\n');
-  const footer = `\nTotal,,${fileTotal(file.expenses)},`;
-
-  const csv = header + rows + footer;
-  const fileName = file.name.replace(/[^a-z0-9]/gi, '_');
-  const path = `${FS.cacheDirectory}${fileName}.csv`;
-
+  const csv = buildCsv(file, indexMap);
+  const path = `${cacheDir()}${safeFileName(file.name)}.csv`;
   await FileSystem.writeAsStringAsync(path, csv, {
-    encoding: 'utf8' as never,
+    encoding: FileSystem.EncodingType.UTF8,
   });
   await Sharing.shareAsync(path, { mimeType: 'text/csv', UTI: '.csv' });
+}
+
+// ── Bulk export: every file zipped together ──────────────────────
+async function readFileBase64(uri: string): Promise<string> {
+  return FileSystem.readAsStringAsync(uri, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+}
+
+/**
+ * Build a single ZIP archive containing every file exported as `format`.
+ * Returns the absolute cache path of the resulting .zip.
+ *
+ * Duplicate file names get suffixed (_2, _3…) so nothing is overwritten
+ * inside the archive.
+ */
+export async function exportAllAsZip(
+  files: ExpenseFile[],
+  format: 'pdf' | 'csv',
+  currency?: CurrencyFormat,
+): Promise<void> {
+  if (files.length === 0) throw new Error('No files to export.');
+
+  const zip = new JSZip();
+  const used = new Map<string, number>();
+
+  for (const file of files) {
+    const indexMap = buildIndexMap(file.expenses);
+    let base = safeFileName(file.name);
+    const seen = used.get(base) ?? 0;
+    used.set(base, seen + 1);
+    if (seen > 0) base = `${base}_${seen + 1}`;
+
+    if (format === 'csv') {
+      zip.file(`${base}.csv`, buildCsv(file, indexMap));
+    } else {
+      const html = buildHtml(file, indexMap, currency);
+      const { uri } = await Print.printToFileAsync({ html, base64: false });
+      const b64 = await readFileBase64(uri);
+      zip.file(`${base}.pdf`, b64, { base64: true });
+      try { await FileSystem.deleteAsync(uri, { idempotent: true }); } catch { /* ignore */ }
+    }
+  }
+
+  const base64Zip = await zip.generateAsync({ type: 'base64' });
+  const stamp = new Date().toISOString().slice(0, 10);
+  const zipPath = `${cacheDir()}QuickExpenses_${format}_${stamp}.zip`;
+  await FileSystem.writeAsStringAsync(zipPath, base64Zip, {
+    encoding: FileSystem.EncodingType.Base64,
+  });
+  await Sharing.shareAsync(zipPath, { mimeType: 'application/zip', UTI: 'public.zip-archive' });
 }

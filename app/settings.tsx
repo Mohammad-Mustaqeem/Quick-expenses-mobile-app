@@ -1,7 +1,9 @@
 import React, { useState } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, SafeAreaView,
+  View, Text, TouchableOpacity, StyleSheet,
+  Alert, ActivityIndicator,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
@@ -9,13 +11,43 @@ import { useStore } from '@/store/useStore';
 import { CurrencyPicker } from '@/components/CurrencyPicker';
 import { colors, typography, spacing, radius } from '@/constants/theme';
 import { Currency } from '@/types';
+import { exportAllAsZip } from '@/services/export';
 
 export default function SettingsScreen() {
   const currency      = useStore(s => s.currency);
   const setCurrency   = useStore(s => s.setCurrency);
   const deletedFiles  = useStore(s => s.deletedFiles);
+  const files         = useStore(s => s.files);
 
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
+  const [bulkExporting, setBulkExporting] = useState(false);
+
+  const runBulkExport = async (format: 'pdf' | 'csv') => {
+    if (files.length === 0) {
+      Alert.alert('Nothing to Export', 'You have no expense files yet.');
+      return;
+    }
+    setBulkExporting(true);
+    try {
+      await exportAllAsZip(files, format, currency);
+    } catch {
+      Alert.alert('Failed', 'Could not build the archive. Please try again.');
+    } finally {
+      setBulkExporting(false);
+    }
+  };
+
+  const promptBulkExport = () => {
+    Alert.alert(
+      `Export All Files (${files.length})`,
+      'Bundle every file into a single ZIP archive.',
+      [
+        { text: 'PDF (.zip)',         onPress: () => runBulkExport('pdf') },
+        { text: 'Excel CSV (.zip)',   onPress: () => runBulkExport('csv') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
 
   const handleCurrencySelect = (c: Currency) => {
     setCurrency(c);
@@ -33,6 +65,8 @@ export default function SettingsScreen() {
           onPress={() => router.back()}
           style={styles.backBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -56,6 +90,34 @@ export default function SettingsScreen() {
               </View>
             </View>
             <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+          </TouchableOpacity>
+        </View>
+
+        {/* Backup */}
+        <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>BACKUP</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={[styles.row, { borderBottomWidth: 0 }]}
+            onPress={promptBulkExport}
+            activeOpacity={0.7}
+            disabled={bulkExporting}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconWrap, { backgroundColor: '#EAF6FF' }]}>
+                <Ionicons name="archive-outline" size={18} color={colors.accent} />
+              </View>
+              <View>
+                <Text style={styles.rowTitle}>Export All Files</Text>
+                <Text style={styles.rowSub}>
+                  {files.length} file{files.length !== 1 ? 's' : ''} as PDF or CSV (.zip)
+                </Text>
+              </View>
+            </View>
+            {bulkExporting ? (
+              <ActivityIndicator size="small" color={colors.accent} />
+            ) : (
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            )}
           </TouchableOpacity>
         </View>
 

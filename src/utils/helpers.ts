@@ -4,6 +4,20 @@ export function uid(): string {
   return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 }
 
+/** Upper bound for a single expense — keeps totals, exports and layouts sane. */
+export const MAX_EXPENSE_AMOUNT = 999_999_999_999;
+
+/**
+ * Parse user-entered amount text. Returns the numeric value, or null when
+ * the input is not a positive finite number within MAX_EXPENSE_AMOUNT
+ * (rejects "", "abc", "1e99" → Infinity, negatives and zero).
+ */
+export function parseAmount(text: string): number | null {
+  const value = Number(text.trim());
+  if (!Number.isFinite(value) || value <= 0 || value > MAX_EXPENSE_AMOUNT) return null;
+  return value;
+}
+
 export function formatCurrency(
   amount: number,
   currency?: Pick<Currency, 'symbol' | 'locale'>,

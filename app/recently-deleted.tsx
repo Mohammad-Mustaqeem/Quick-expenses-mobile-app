@@ -1,8 +1,9 @@
 import React from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, SafeAreaView, Alert,
+  StyleSheet, Alert,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/store/useStore';
@@ -53,6 +54,8 @@ export default function RecentlyDeletedScreen() {
           onPress={() => router.back()}
           style={styles.backBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -106,6 +109,8 @@ export default function RecentlyDeletedScreen() {
                 <TouchableOpacity
                   onPress={() => handlePermanentDelete(item)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Permanently delete ${item.name}`}
                 >
                   <Ionicons name="trash-outline" size={16} color={colors.danger} />
                 </TouchableOpacity>

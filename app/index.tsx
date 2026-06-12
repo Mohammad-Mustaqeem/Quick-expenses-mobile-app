@@ -9,10 +9,11 @@ import {
   TextInput,
   Modal,
   Pressable,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/store/useStore';
@@ -29,6 +30,9 @@ export default function HomeScreen() {
   const currency        = useStore(s => s.currency);
   const showOnLaunch    = useStore(s => s.showCurrencyPickerOnLaunch);
   const markPickerShown = useStore(s => s.markCurrencyPickerShown);
+  const loadData        = useStore(s => s.loadData);
+
+  const [refreshing, setRefreshing] = useState(false);
 
   const [showModal, setShowModal]             = useState(false);
   const [name, setName]                       = useState('');
@@ -112,6 +116,8 @@ export default function HomeScreen() {
             onPress={toggleSearch}
             style={styles.iconBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel={searchOpen ? 'Close search' : 'Search files'}
           >
             <Ionicons
               name={searchOpen ? 'close-outline' : 'search-outline'}
@@ -123,6 +129,8 @@ export default function HomeScreen() {
             onPress={() => router.push('/settings')}
             style={styles.iconBtn}
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
           >
             <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
           </TouchableOpacity>
@@ -159,6 +167,18 @@ export default function HomeScreen() {
         contentContainerStyle={styles.list}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={async () => {
+              setRefreshing(true);
+              await loadData();
+              setRefreshing(false);
+            }}
+            tintColor={colors.accent}
+            colors={[colors.accent]}
+          />
+        }
         ListHeaderComponent={<AddFileCard />}
         ListEmptyComponent={
           searchOpen && query.trim() ? (

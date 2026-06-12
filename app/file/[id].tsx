@@ -1,110 +1,301 @@
-import React, { useState, useRef, useMemo, useEffect } from 'react';
+import React, { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
   ScrollView,
   TouchableOpacity,
-  Pressable,
   StyleSheet,
-  SafeAreaView,
-  KeyboardAvoidingView,
   TextInput,
   Alert,
   ActivityIndicator,
   Platform,
   Keyboard,
+  Animated,
+  PanResponder,
+  Image,
+  Pressable,
+  TouchableWithoutFeedback,
 } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/store/useStore';
 import { ExpenseForm } from '@/components/ExpenseForm';
 import { UndoToast } from '@/components/UndoToast';
+import { PhotoViewer } from '@/components/PhotoViewer';
 import { colors, typography, spacing, radius } from '@/constants/theme';
-import { formatDateTime, fileTotal } from '@/utils/helpers';
+import { formatDateTime, fileTotal, parseAmount } from '@/utils/helpers';
 import { useCurrency } from '@/hooks/useCurrency';
 import { exportToPDF, exportToCSV } from '@/services/export';
+import { deleteAttachment } from '@/services/attachments';
+import { pickPhoto, PhotoSource } from '@/services/photoPicker';
 import { Expense } from '@/types';
 
 // ── Column widths ─────────────────────────────────────────────
-const COL_NO     = 36;   // S.NO — wider to fit label
-const COL_AMOUNT = 96;   // Amount
-const COL_PENCIL = 28;   // Edit icon
-const COL_DELETE = 26;   // Delete icon
+const COL_NO     = 36;
+const COL_AMOUNT = 96;
+const COL_PENCIL = 28;
+const COL_DELETE = 26;
+const DELETE_W   = 72;   // swipe-left reveal width for delete action
 
+// ── Swipeable row ─────────────────────────────────────────────
+interface RowProps {
+  expense: Expense;
+  index: number;
+  onEdit: (e: Expense) => void;
+  onDelete: (id: string, name: string) => void;
+  formatAmount: (n: number) => string;
+}
+
+const SwipeRow = React.memo(function SwipeRow({
+  expense,
+  index,
+  onEdit,
+  onDelete,
+  formatAmount,
+}: RowProps) {
+  const translateX = useRef(new Animated.Value(0)).current;
+  const isOpen = useRef(false);
+
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_, g) =>
+        Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
+      onPanResponderMove: (_, g) => {
+        const base = isOpen.current ? -DELETE_W : 0;
+        translateX.setValue(Math.max(Math.min(base + g.dx, 0), -DELETE_W));
+      },
+      onPanResponderRelease: (_, g) => {
+        const base = isOpen.current ? -DELETE_W : 0;
+        const end = base + g.dx;
+        if (end < -DELETE_W / 2) {
+          Animated.spring(translateX, { toValue: -DELETE_W, useNativeDriver: true }).start();
+          isOpen.current = true;
+        } else {
+          Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+          isOpen.current = false;
+        }
+      },
+    })
+  ).current;
+
+  const close = useCallback(() => {
+    Animated.spring(translateX, { toValue: 0, useNativeDriver: true }).start();
+    isOpen.current = false;
+  }, [translateX]);
+
+  return (
+    <View style={styles.swipeContainer}>
+      {/* Delete action — revealed when user swipes left */}
+      <TouchableOpacity
+        style={styles.deleteAction}
+        onPress={() => { close(); onDelete(expense.id, expense.particular); }}
+        activeOpacity={0.85}
+      >
+        <Ionicons name="trash" size={18} color={colors.white} />
+        <Text style={styles.deleteActionText}>Delete</Text>
+      </TouchableOpacity>
+
+      {/* Row content — slides left to expose the delete action.
+          Pressable wraps the content so long-press opens Edit; the
+          PanResponder lives on the outer Animated.View and only claims
+          the gesture when the user actually swipes horizontally, so
+          taps and long-presses still flow through. */}
+      <Animated.View
+        style={[styles.dataRow, { transform: [{ translateX }] }]}
+        {...panResponder.panHandlers}
+      >
+        <Pressable
+          style={styles.rowPress}
+          onLongPress={() => { close(); onEdit(expense); }}
+          delayLongPress={350}
+          android_ripple={{ color: 'rgba(0,0,0,0.04)' }}
+        >
+          <Text style={[styles.indexText, styles.colCell, { width: COL_NO }]}>{index}</Text>
+          <View style={styles.colDivider} />
+
+          <View style={[styles.grow, styles.colCell]}>
+            <View style={styles.particularRow}>
+              <Text style={styles.particularText} numberOfLines={1}>{expense.particular}</Text>
+              {expense.photoUri && (
+                <Ionicons name="image" size={11} color={colors.accent} style={styles.attachIcon} />
+              )}
+              {expense.note && (
+                <Ionicons name="document-text" size={11} color={colors.accent} style={styles.attachIcon} />
+              )}
+            </View>
+            <Text style={styles.dateTimeText}>{formatDateTime(expense.createdAt)}</Text>
+          </View>
+          <View style={styles.colDivider} />
+
+          <Text style={[styles.amountText, { width: COL_AMOUNT }]}>
+            {formatAmount(expense.amount)}
+          </Text>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, { width: COL_PENCIL }]}
+            onPress={() => { close(); onEdit(expense); }}
+            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Edit ${expense.particular}`}
+          >
+            <Ionicons name="pencil-outline" size={14} color={colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.actionBtn, { width: COL_DELETE }]}
+            onPress={() => { close(); onDelete(expense.id, expense.particular); }}
+            hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${expense.particular}`}
+          >
+            <Ionicons name="trash-outline" size={14} color={colors.danger} />
+          </TouchableOpacity>
+        </Pressable>
+      </Animated.View>
+    </View>
+  );
+});
+
+// ── Main screen ───────────────────────────────────────────────
 export default function FileScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
-  const file              = useStore(s => s.getFile(id));
-  const renameFile        = useStore(s => s.renameFile);
-  const addExpense        = useStore(s => s.addExpense);
-  const updateExpense     = useStore(s => s.updateExpense);
-  const deleteExpense     = useStore(s => s.deleteExpense);
+  const file          = useStore(s => s.getFile(id));
+  const renameFile    = useStore(s => s.renameFile);
+  const addExpense    = useStore(s => s.addExpense);
+  const updateExpense = useStore(s => s.updateExpense);
+  const deleteExpense = useStore(s => s.deleteExpense);
   const { currency, formatAmount } = useCurrency();
+  const insets = useSafeAreaInsets();
 
-  // New-entry inputs
   const [particular, setParticular] = useState('');
   const [amount, setAmount]         = useState('');
+  const [note, setNote]             = useState('');
+  const [photoUri, setPhotoUri]     = useState<string | null>(null);
+  const [extrasOpen, setExtrasOpen] = useState(false);
+  const [viewerUri, setViewerUri]   = useState<string | null>(null);
   const particularRef = useRef<TextInput>(null);
   const amountRef     = useRef<TextInput>(null);
+  const noteRef       = useRef<TextInput>(null);
   const scrollRef     = useRef<ScrollView>(null);
 
-  // Rename
   const [isRenaming, setIsRenaming] = useState(false);
   const [nameInput, setNameInput]   = useState('');
-
-  // Export
-  const [exporting, setExporting] = useState(false);
-
-  // Search
+  const [exporting, setExporting]   = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Edit modal
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
 
-  // Undo delete
   const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
   const [undoVisible, setUndoVisible]         = useState(false);
   const [undoMessage, setUndoMessage]         = useState('');
   const undoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Mirrors pendingDeleteId so the stable handleDelete callback can read the
+  // current value without depending on it (keeps row memoization effective).
+  const pendingDeleteRef = useRef<string | null>(null);
 
-  // Auto-focus the description input when the screen first loads
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardPad, setKeyboardPad]         = useState(0);
+  // Ref to the container we pad — used on Android to measure how much the
+  // keyboard actually overlaps it (see keyboard listener below).
+  const kavRef = useRef<View>(null);
+
   useEffect(() => {
     const timer = setTimeout(() => particularRef.current?.focus(), 350);
     return () => clearTimeout(timer);
   }, []);
 
-  // Keyboard visibility — drives the dismiss arrow
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
   useEffect(() => {
-    const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
-    const hide  = Keyboard.addListener('keyboardDidHide', () => setKeyboardVisible(false));
+    const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const show = Keyboard.addListener(showEvt, (e) => {
+      setKeyboardVisible(true);
+      if (Platform.OS === 'ios') {
+        // iOS never resizes the window — lift by the full keyboard frame
+        // (it already includes the suggestion bar + home indicator).
+        setKeyboardPad(e.endCoordinates?.height ?? 0);
+      } else {
+        // Android: depending on edge-to-edge / adjustResize the OS may have
+        // already shrunk the window — or not at all. Instead of guessing,
+        // measure the REAL overlap between this container's bottom edge and
+        // the top of the keyboard, and pad exactly that much. Works on every
+        // build regardless of softwareKeyboardLayoutMode.
+        const keyboardTop = e.endCoordinates?.screenY ?? 0;
+        setTimeout(() => {
+          kavRef.current?.measureInWindow((_x, y, _w, h) => {
+            if (keyboardTop > 0) {
+              setKeyboardPad(Math.max(0, y + h - keyboardTop));
+            } else {
+              setKeyboardPad(e.endCoordinates?.height ?? 0);
+            }
+          });
+        }, 60); // let any native window resize settle before measuring
+      }
+    });
+    const hide = Keyboard.addListener(hideEvt, () => {
+      setKeyboardVisible(false);
+      setKeyboardPad(0);
+    });
     return () => { show.remove(); hide.remove(); };
   }, []);
 
-  // ── Derived ───────────────────────────────────────────────────
   const filteredExpenses = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!file || !q) return file?.expenses ?? [];
-    return file.expenses.filter((e) =>
-      e.particular.toLowerCase().includes(q)
-    );
+    return file.expenses.filter(e => e.particular.toLowerCase().includes(q));
   }, [file?.expenses, searchQuery]);
 
-  // Newest first — reverse without mutating; hide any pending-undo item
   const displayExpenses = useMemo(
     () => [...filteredExpenses].reverse().filter(e => e.id !== pendingDeleteId),
     [filteredExpenses, pendingDeleteId]
   );
 
-  // Real 1-based position of each expense in the full chronological list
   const expenseIndexMap = useMemo(() => {
     const map = new Map<string, number>();
     file?.expenses.forEach((e, i) => map.set(e.id, i + 1));
     return map;
   }, [file?.expenses]);
 
+  // ── Row callbacks ─────────────────────────────────────────────
+  // Stable identities so the memoized SwipeRow doesn't re-render on every
+  // keystroke in the input row. State is read through useStore.getState()
+  // inside the timer to avoid stale closures over `file`.
+  const fileId = file?.id;
+
+  const handleEditOpen = useCallback(
+    (expense: Expense) => setEditingExpense(expense),
+    []
+  );
+
+  const handleDelete = useCallback((expId: string, name: string) => {
+    if (!fileId) return;
+    const { getFile, deleteExpense: removeExpense } = useStore.getState();
+
+    // Commit any still-pending previous delete first
+    if (pendingDeleteRef.current) {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      const prev = getFile(fileId)?.expenses.find(e => e.id === pendingDeleteRef.current);
+      removeExpense(fileId, pendingDeleteRef.current);
+      if (prev?.photoUri) deleteAttachment(prev.photoUri);
+    }
+
+    pendingDeleteRef.current = expId;
+    setPendingDeleteId(expId);
+    setUndoMessage(`"${name}" removed`);
+    setUndoVisible(true);
+    undoTimerRef.current = setTimeout(() => {
+      const target = useStore.getState().getFile(fileId)?.expenses.find(e => e.id === expId);
+      useStore.getState().deleteExpense(fileId, expId);
+      if (target?.photoUri) deleteAttachment(target.photoUri);
+      pendingDeleteRef.current = null;
+      setPendingDeleteId(null);
+      setUndoVisible(false);
+    }, 5000);
+  }, [fileId]);
+
   if (!file) {
     return (
-      <SafeAreaView style={styles.safe}>
+      <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
         <View style={styles.center}>
           <Text style={styles.notFoundText}>File not found</Text>
           <TouchableOpacity onPress={() => router.back()}>
@@ -118,50 +309,78 @@ export default function FileScreen() {
   const total      = fileTotal(file.expenses);
   const subtotal   = fileTotal(filteredExpenses);
   const isSearching = searchQuery.trim().length > 0;
-
-  // When searching, export only the filtered rows
-  const exportFile = isSearching
+  const exportFile  = isSearching
     ? { ...file, name: `${file.name} — ${searchQuery}`, expenses: filteredExpenses }
     : file;
 
   // ── Handlers ──────────────────────────────────────────────────
   const handleAdd = () => {
     const trimmed = particular.trim();
-    const parsed  = parseFloat(amount);
-    if (!trimmed)                    { particularRef.current?.focus(); return; }
-    if (isNaN(parsed) || parsed <= 0){ amountRef.current?.focus();    return; }
-    addExpense(file.id, trimmed, parsed);
+    const parsed  = parseAmount(amount);
+    if (!trimmed)        { particularRef.current?.focus(); return; }
+    if (parsed === null) {
+      if (amount.trim()) {
+        Alert.alert('Invalid Amount', 'Enter a positive amount up to 999,999,999,999.');
+      }
+      amountRef.current?.focus();
+      return;
+    }
+    addExpense(file.id, trimmed, parsed, {
+      note:     note.trim() || undefined,
+      photoUri: photoUri || undefined,
+    });
     setParticular('');
     setAmount('');
+    setNote('');
+    setPhotoUri(null);
+    setExtrasOpen(false);
     setTimeout(() => particularRef.current?.focus(), 50);
   };
 
-  const handleEditOpen = (expense: Expense) => setEditingExpense(expense);
-
-  const handleEditSave = (p: string, a: number) => {
-    if (!editingExpense) return;
-    updateExpense(file.id, editingExpense.id, p, a);
-    setEditingExpense(null);
+  const attachPhoto = async (source: PhotoSource) => {
+    const persisted = await pickPhoto(source);
+    if (!persisted) return;
+    // Replace any previous draft photo
+    if (photoUri) await deleteAttachment(photoUri);
+    setPhotoUri(persisted);
   };
 
-  const handleDelete = (expId: string, name: string) => {
-    // Commit any still-pending previous delete first
-    if (pendingDeleteId) {
-      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
-      deleteExpense(file.id, pendingDeleteId);
-    }
-    setPendingDeleteId(expId);
-    setUndoMessage(`"${name}" removed`);
-    setUndoVisible(true);
-    undoTimerRef.current = setTimeout(() => {
-      deleteExpense(file.id, expId);
-      setPendingDeleteId(null);
-      setUndoVisible(false);
-    }, 5000);
+  const clearDraftPhoto = async () => {
+    if (photoUri) await deleteAttachment(photoUri);
+    setPhotoUri(null);
+  };
+
+  const toggleExtras = () => {
+    const next = !extrasOpen;
+    setExtrasOpen(next);
+    if (next) setTimeout(() => noteRef.current?.focus(), 80);
+  };
+
+  const promptAttachPhoto = () => {
+    Alert.alert(
+      'Attach Photo',
+      'Choose a source',
+      [
+        { text: 'Take Photo',          onPress: () => attachPhoto('camera') },
+        { text: 'Choose from Gallery', onPress: () => attachPhoto('gallery') },
+        { text: 'Cancel', style: 'cancel' },
+      ]
+    );
+  };
+
+  const handleEditSave = (
+    p: string,
+    a: number,
+    extras: { note?: string; photoUri?: string }
+  ) => {
+    if (!editingExpense) return;
+    updateExpense(file.id, editingExpense.id, p, a, extras);
+    setEditingExpense(null);
   };
 
   const handleUndo = () => {
     if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+    pendingDeleteRef.current = null;
     setPendingDeleteId(null);
     setUndoVisible(false);
   };
@@ -169,7 +388,10 @@ export default function FileScreen() {
   const handleUndoDismiss = () => {
     if (pendingDeleteId) {
       if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+      const target = file.expenses.find(e => e.id === pendingDeleteId);
       deleteExpense(file.id, pendingDeleteId);
+      if (target?.photoUri) deleteAttachment(target.photoUri);
+      pendingDeleteRef.current = null;
       setPendingDeleteId(null);
     }
     setUndoVisible(false);
@@ -190,8 +412,6 @@ export default function FileScreen() {
   const runExport = async (type: 'pdf' | 'csv') => {
     setExporting(true);
     try {
-      // Pass the full expense list as originalExpenses so the export
-      // functions can look up each entry's real serial number.
       if (type === 'pdf') await exportToPDF(exportFile, file.expenses, currency);
       else await exportToCSV(exportFile, file.expenses, currency);
     } catch {
@@ -230,6 +450,8 @@ export default function FileScreen() {
   // ── Render ────────────────────────────────────────────────────
   return (
     <SafeAreaView style={styles.safe}>
+    <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
+    <View style={styles.body}>
 
       {/* ── Header ── */}
       <View style={styles.header}>
@@ -237,6 +459,8 @@ export default function FileScreen() {
           onPress={() => router.back()}
           style={styles.backBtn}
           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          accessibilityRole="button"
+          accessibilityLabel="Go back"
         >
           <Ionicons name="chevron-back" size={22} color={colors.textPrimary} />
         </TouchableOpacity>
@@ -263,10 +487,22 @@ export default function FileScreen() {
             <ActivityIndicator size="small" color={colors.textPrimary} />
           ) : (
             <>
-              <TouchableOpacity onPress={promptDownload} style={styles.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+              <TouchableOpacity
+                onPress={promptDownload}
+                style={styles.iconBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Download file"
+              >
                 <Ionicons name="download-outline" size={21} color={colors.textPrimary} />
               </TouchableOpacity>
-              <TouchableOpacity onPress={promptShare} style={styles.iconBtn} hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}>
+              <TouchableOpacity
+                onPress={promptShare}
+                style={styles.iconBtn}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Share file"
+              >
                 <Ionicons name="share-social-outline" size={20} color={colors.textPrimary} />
               </TouchableOpacity>
             </>
@@ -294,132 +530,141 @@ export default function FileScreen() {
       </View>
 
       {/*
-        ── KeyboardAvoidingView ──────────────────────────────────
-        Wraps the scroll list + the fixed bottom bar together.
-        On iOS: adds padding equal to keyboard height so the bottom
-        bar lifts up above the keyboard.
-        On Android: the OS resizes the window (adjustResize) so the
-        bar stays visible automatically — no extra behavior needed.
+        Bottom spacing — keyboardPad is computed in the keyboard listener:
+        • iOS → full keyboard frame height (window never resizes).
+        • Android → the MEASURED overlap between this container and the
+          keyboard, taken after any native window resize has settled. If the
+          OS already resized (adjustResize active) the overlap is ~0; if
+          edge-to-edge suppressed the resize, the overlap is the keyboard
+          height. Either way the input row ends up exactly above the keyboard
+          with no gap and no clipping.
+        • Keyboard closed → bottom safe-area inset so the input row clears
+          the Android nav bar / iOS home indicator.
+        Note: padding is inside this container, so it does not change the
+        container's own window bounds — the measurement never feedback-loops.
       */}
-      <KeyboardAvoidingView
-        style={styles.kav}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      <View
+        ref={kavRef}
+        style={[
+          styles.kav,
+          { paddingBottom: keyboardVisible ? keyboardPad : insets.bottom },
+        ]}
       >
 
-        {/* ── Scrollable expense list ── */}
-        <ScrollView
-          ref={scrollRef}
-          contentContainerStyle={styles.content}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Table — data rows only; input row lives below in the fixed bar */}
-          <View style={styles.table}>
+        {/*
+          ── Table card ───────────────────────────────────────────
+          overflow:hidden clips the blue header/input corners to
+          match the card's borderRadius. The card itself is flex:1
+          so it fills the available space — only the rows inside
+          the ScrollView scroll; header and input row are fixed.
+        */}
+        <View style={styles.tableCard}>
 
-            <View style={styles.tableHead}>
-              <Text style={[styles.headCell, { width: COL_NO }]}>S.NO</Text>
-              <Text style={[styles.headCell, styles.grow]}>Particulars</Text>
-              <Text style={[styles.headCell, { width: COL_AMOUNT, textAlign: 'right' }]}>Amount</Text>
-              <View style={{ width: COL_PENCIL + COL_DELETE }} />
-            </View>
+          {/* Fixed blue column header — never scrolls */}
+          <View style={styles.tableHead}>
+            <Text style={[styles.headCell, { width: COL_NO }]}>S.NO</Text>
+            <View style={styles.colDividerLight} />
+            <Text style={[styles.headCell, styles.grow]}>Particulars</Text>
+            <View style={styles.colDividerLight} />
+            <Text style={[styles.headCell, { width: COL_AMOUNT, textAlign: 'right' }]}>Amount</Text>
+            <View style={{ width: COL_PENCIL + COL_DELETE }} />
+          </View>
 
+          {/* Scrollable data rows — scroll regardless of row count.
+              Tap anywhere in the empty scroll area to dismiss the keyboard. */}
+          <ScrollView
+            ref={scrollRef}
+            style={styles.tableScroll}
+            contentContainerStyle={{ flexGrow: 1 }}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            showsVerticalScrollIndicator={false}
+            onScrollBeginDrag={() => Keyboard.dismiss()}
+          >
+            {/* No results (search) */}
             {filteredExpenses.length === 0 && isSearching && (
               <View style={styles.noResults}>
                 <Text style={styles.noResultsText}>No results for "{searchQuery}"</Text>
               </View>
             )}
 
-            {displayExpenses.map((expense) => (
-              <Pressable
-                key={expense.id}
-                style={({ pressed }) => [styles.dataRow, pressed && styles.dataRowPressed]}
-                onLongPress={() => handleEditOpen(expense)}
-                delayLongPress={400}
-              >
-                <Text style={[styles.indexText, { width: COL_NO }]}>
-                  {expenseIndexMap.get(expense.id) ?? '—'}
-                </Text>
-
-                <View style={styles.grow}>
-                  <Text style={styles.particularText} numberOfLines={1}>
-                    {expense.particular}
-                  </Text>
-                  <Text style={styles.dateTimeText}>{formatDateTime(expense.createdAt)}</Text>
-                </View>
-
-                <Text style={[styles.amountText, { width: COL_AMOUNT }]}>
-                  {formatAmount(expense.amount)}
-                </Text>
-
-                <TouchableOpacity
-                  style={[styles.actionBtn, { width: COL_PENCIL }]}
-                  onPress={() => handleEditOpen(expense)}
-                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                >
-                  <Ionicons name="pencil-outline" size={14} color={colors.textMuted} />
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.actionBtn, { width: COL_DELETE }]}
-                  onPress={() => handleDelete(expense.id, expense.particular)}
-                  hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                >
-                  <Ionicons name="trash-outline" size={14} color={colors.danger} />
-                </TouchableOpacity>
-              </Pressable>
-            ))}
-          </View>
-
-          {/* Subtotal — search mode only */}
-          {isSearching && filteredExpenses.length > 0 && (
-            <View style={styles.subtotalCard}>
-              <View>
-                <Text style={styles.subtotalLabel}>Subtotal</Text>
-                <Text style={styles.subtotalMeta}>
-                  {filteredExpenses.length} result{filteredExpenses.length !== 1 ? 's' : ''} for "{searchQuery}"
-                </Text>
+            {/* Empty state (no expenses yet) */}
+            {displayExpenses.length === 0 && !isSearching && (
+              <View style={styles.emptyTable}>
+                <Ionicons name="receipt-outline" size={36} color={colors.borderLight} />
+                <Text style={styles.emptyTableText}>No entries yet</Text>
+                <Text style={styles.emptyTableSub}>Type below to add your first entry</Text>
               </View>
-              <Text style={styles.subtotalAmount}>{formatAmount(subtotal)}</Text>
+            )}
+
+            {/* Swipeable expense rows */}
+            {displayExpenses.map(expense => (
+              <SwipeRow
+                key={expense.id}
+                expense={expense}
+                index={expenseIndexMap.get(expense.id) ?? 0}
+                onEdit={handleEditOpen}
+                onDelete={handleDelete}
+                formatAmount={formatAmount}
+              />
+            ))}
+          </ScrollView>
+
+          {/* Grand Total row — lives inside the table card, above the input row */}
+          {!isSearching && file.expenses.length > 0 && (
+            <View style={styles.tableTotalRow}>
+              <View style={{ width: COL_NO }} />
+              <View style={styles.colDivider} />
+              <Text style={[styles.tableTotalLabel, styles.grow]}>TOTAL</Text>
+              <View style={styles.colDivider} />
+              <Text
+                style={styles.tableTotalAmount}
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.75}
+              >
+                {formatAmount(total)}
+              </Text>
+              <View style={{ width: COL_PENCIL + COL_DELETE }} />
             </View>
           )}
-        </ScrollView>
 
-        {/*
-          ── Fixed bottom bar ──────────────────────────────────────
-          Always stays above the keyboard. Contains:
-            • New-entry input row  (hidden while searching)
-            • Grand Total          (hidden while searching)
-          Drag the list down to dismiss the keyboard at any time.
-        */}
-        {/* Undo toast — appears above the input bar */}
-        <UndoToast
-          visible={undoVisible}
-          message={undoMessage}
-          onUndo={handleUndo}
-          onDismiss={handleUndoDismiss}
-        />
-
-        {!isSearching && (
-          <View style={styles.bottomBar}>
-
-            {/* Input row */}
+          {/* Fixed blue input row — always visible at the bottom of the card */}
+          {!isSearching && (
             <View style={styles.inputRow}>
-              <Text style={[styles.indexText, styles.inputIndex, { color: 'rgba(255,255,255,0.75)' }]}>
+              <Text style={[styles.indexText, styles.inputIndex]}>
                 {file.expenses.length + 1}
               </Text>
+              <View style={styles.colDividerLight} />
 
               <TextInput
                 ref={particularRef}
                 style={[styles.inputCell, styles.grow]}
                 value={particular}
                 onChangeText={setParticular}
-                placeholder="Description"
-                placeholderTextColor="rgba(255,255,255,0.55)"
+                placeholder="Expense description"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                cursorColor={colors.white}
+                selectionColor={colors.white}
                 returnKeyType="next"
                 blurOnSubmit={false}
                 onSubmitEditing={() => amountRef.current?.focus()}
               />
+
+              <TouchableOpacity
+                style={styles.inputCenterBtn}
+                onPress={handleAdd}
+                hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
+                accessibilityRole="button"
+                accessibilityLabel="Add expense"
+              >
+                <Ionicons
+                  name="return-down-back-outline"
+                  size={15}
+                  color={particular.trim() ? colors.white : 'rgba(255,255,255,0.4)'}
+                />
+              </TouchableOpacity>
+              <View style={styles.colDividerLight} />
 
               <TextInput
                 ref={amountRef}
@@ -427,48 +672,125 @@ export default function FileScreen() {
                 value={amount}
                 onChangeText={setAmount}
                 placeholder="0.00"
-                placeholderTextColor="rgba(255,255,255,0.55)"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                cursorColor={colors.white}
+                selectionColor={colors.white}
                 keyboardType="decimal-pad"
                 returnKeyType="done"
                 onSubmitEditing={handleAdd}
               />
 
-              <TouchableOpacity
-                style={[styles.actionBtn, { width: COL_PENCIL + COL_DELETE }]}
-                onPress={handleAdd}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              >
-                <Ionicons
-                  name="return-down-back-outline"
-                  size={15}
-                  color={particular.trim() ? colors.white : 'rgba(255,255,255,0.55)'}
-                />
-              </TouchableOpacity>
-            </View>
-
-            {/* Grand Total */}
-            {file.expenses.length > 0 && (
-              <View style={styles.totalRow}>
-                <Text style={styles.totalLabel}>Grand Total</Text>
-                <Text style={styles.totalAmount}>{formatAmount(total)}</Text>
+              <View style={[styles.inputBtnCluster, { width: COL_PENCIL + COL_DELETE }]}>
+                <TouchableOpacity
+                  style={styles.inputClusterBtn}
+                  onPress={toggleExtras}
+                  hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
+                  accessibilityRole="button"
+                  accessibilityLabel={extrasOpen ? 'Hide note field' : 'Add a note'}
+                >
+                  <Ionicons
+                    name={extrasOpen ? 'remove' : 'add'}
+                    size={16}
+                    color={
+                      extrasOpen || note.trim() || photoUri
+                        ? colors.white
+                        : 'rgba(255,255,255,0.55)'
+                    }
+                  />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.inputClusterBtn}
+                  onPress={promptAttachPhoto}
+                  hitSlop={{ top: 8, bottom: 8, left: 2, right: 2 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Attach photo"
+                >
+                  <Ionicons
+                    name="camera-outline"
+                    size={16}
+                    color={photoUri ? colors.white : 'rgba(255,255,255,0.75)'}
+                  />
+                </TouchableOpacity>
               </View>
-            )}
+            </View>
+          )}
 
-            {/* Keyboard dismiss — tap to close keyboard */}
-            {keyboardVisible && (
-              <TouchableOpacity
-                style={styles.kbDismiss}
-                onPress={() => Keyboard.dismiss()}
-                activeOpacity={0.75}
-              >
-                <Ionicons name="chevron-down" size={15} color={colors.textMuted} />
-                <Text style={styles.kbDismissText}>Done</Text>
-              </TouchableOpacity>
-            )}
+          {/* ── Expanded extras panel — note only ── */}
+          {!isSearching && extrasOpen && (
+            <View style={styles.extrasPanel}>
+              <View style={styles.extrasRow}>
+                <TextInput
+                  ref={noteRef}
+                  style={styles.noteInput}
+                  value={note}
+                  onChangeText={setNote}
+                  placeholder="Add a note (optional)…"
+                  placeholderTextColor="rgba(255,255,255,0.55)"
+                  cursorColor={colors.white}
+                  selectionColor={colors.white}
+                  multiline
+                />
+              </View>
+
+              {/* If a photo is already attached via the camera icon, show its thumbnail here */}
+              {photoUri && (
+                <View style={styles.extrasActions}>
+                  <View style={styles.thumbWrap}>
+                    <TouchableOpacity onPress={() => setViewerUri(photoUri)} activeOpacity={0.85}>
+                      <Image source={{ uri: photoUri }} style={styles.thumb} />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.thumbRemove}
+                      onPress={clearDraftPhoto}
+                      hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                    >
+                      <Ionicons name="close" size={12} color={colors.white} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* ── Below-table area ── */}
+
+        {/* Undo toast */}
+        <UndoToast
+          visible={undoVisible}
+          message={undoMessage}
+          onUndo={handleUndo}
+          onDismiss={handleUndoDismiss}
+        />
+
+        {/* Subtotal — search mode */}
+        {isSearching && filteredExpenses.length > 0 && (
+          <View style={styles.subtotalCard}>
+            <View>
+              <Text style={styles.subtotalLabel}>Subtotal</Text>
+              <Text style={styles.subtotalMeta}>
+                {filteredExpenses.length} result{filteredExpenses.length !== 1 ? 's' : ''} for "{searchQuery}"
+              </Text>
+            </View>
+            <Text style={styles.subtotalAmount}>{formatAmount(subtotal)}</Text>
           </View>
         )}
 
-      </KeyboardAvoidingView>
+        {/* Keyboard dismiss */}
+        {keyboardVisible && (
+          <TouchableOpacity
+            style={styles.kbDismiss}
+            onPress={() => Keyboard.dismiss()}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="chevron-down" size={15} color={colors.textMuted} />
+            <Text style={styles.kbDismissText}>Done</Text>
+          </TouchableOpacity>
+        )}
+
+      </View>
+    </View>
+    </TouchableWithoutFeedback>
 
       {/* ── Edit Modal ── */}
       <ExpenseForm
@@ -478,15 +800,19 @@ export default function FileScreen() {
         onClose={() => setEditingExpense(null)}
       />
 
+      {/* ── Photo viewer — pinch to zoom, double-tap to zoom, drag to pan ── */}
+      <PhotoViewer uri={viewerUri} onClose={() => setViewerUri(null)} />
+
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe:          { flex: 1, backgroundColor: colors.bgApp },
-  center:        { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  notFoundText:  { fontSize: typography.sizes.base, color: colors.textMuted },
-  backLink:      { fontSize: typography.sizes.base, color: colors.accent, marginTop: spacing.sm },
+  safe:         { flex: 1, backgroundColor: colors.bgApp },
+  body:         { flex: 1 },
+  center:       { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  notFoundText: { fontSize: typography.sizes.base, color: colors.textMuted },
+  backLink:     { fontSize: typography.sizes.base, color: colors.accent, marginTop: spacing.sm },
 
   // ── Header ──────────────────────────────────────────────────
   header: {
@@ -543,70 +869,122 @@ const styles = StyleSheet.create({
     height: 42,
   },
   searchIcon:  { marginRight: spacing.sm },
-  searchInput: { flex: 1, fontSize: typography.sizes.base, color: colors.textPrimary, paddingVertical: 0 },
-
-  // ── KeyboardAvoidingView ────────────────────────────────────
-  kav: { flex: 1 },
-
-  // ── Fixed bottom bar ────────────────────────────────────────
-  bottomBar: {
-    backgroundColor: colors.bgCard,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
-    paddingBottom: spacing.sm,
+  searchInput: {
+    flex: 1,
+    fontSize: typography.sizes.base,
+    color: colors.textPrimary,
+    paddingVertical: 0,
   },
 
-  // ── Content ─────────────────────────────────────────────────
-  content: { padding: spacing.base, paddingBottom: spacing.xxl },
+  // ── Layout ──────────────────────────────────────────────────
+  kav: { flex: 1 },
 
-  // ── Table ───────────────────────────────────────────────────
-  table: {
-    backgroundColor: colors.bgCard,
+  // ── Table card ──────────────────────────────────────────────
+  // flex:1 fills available space; overflow:hidden rounds the
+  // header's top corners and the input row's bottom corners.
+  tableCard: {
+    flex: 1,
+    marginHorizontal: spacing.base,
     borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.borderLight,
     overflow: 'hidden',
+    backgroundColor: colors.bgCard,
+    marginBottom: spacing.xs,
   },
 
-  // Header row
+  // ── Table header — fixed above ScrollView ─────────────────
   tableHead: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    paddingVertical: spacing.md,
     paddingHorizontal: spacing.md,
     backgroundColor: colors.accent,
-    borderBottomWidth: 0,
+    minHeight: 48,
   },
   headCell: {
+    fontSize: 11,
+    fontWeight: typography.weights.bold,
+    color: colors.white,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+
+  // ── Scrollable area ──────────────────────────────────────────
+  tableScroll: { flex: 1 },
+
+  // ── Swipeable row ────────────────────────────────────────────
+  swipeContainer: {
+    overflow: 'hidden',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderLight,
+  },
+  deleteAction: {
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    bottom: 0,
+    width: DELETE_W,
+    backgroundColor: colors.danger,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 3,
+  },
+  deleteActionText: {
     fontSize: 10,
     fontWeight: typography.weights.semibold,
     color: colors.white,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
+    letterSpacing: 0.3,
   },
-
-  // Data row
   dataRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+    backgroundColor: colors.bgCard,
+    minHeight: 48,
+  },
+  rowPress: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 11,
     paddingHorizontal: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderLight,
   },
-  dataRowPressed: {
-    backgroundColor: colors.bgSurface,
+  colCell: {
+    paddingHorizontal: spacing.xs,
+  },
+  // Vertical divider between table columns. Light grey for data/total rows.
+  colDivider: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: colors.borderLight,
+    marginVertical: 2,
+  },
+  // White divider for blue header + blue input rows.
+  colDividerLight: {
+    width: StyleSheet.hairlineWidth,
+    alignSelf: 'stretch',
+    backgroundColor: 'rgba(255,255,255,0.35)',
+    marginVertical: 4,
   },
   indexText: {
     fontSize: typography.sizes.xs,
     color: colors.textLabel,
+  },
+  particularRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
   },
   particularText: {
     fontSize: typography.sizes.base,
     fontWeight: typography.weights.medium,
     color: colors.textPrimary,
     marginBottom: 2,
+    flexShrink: 1,
   },
+  attachIcon: { marginBottom: 2 },
   dateTimeText: {
     fontSize: 10,
     color: colors.textLabel,
@@ -624,39 +1002,175 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
 
-  // No results
-  noResults:     { paddingVertical: spacing.lg, alignItems: 'center' },
+  // ── Empty / no-results states ─────────────────────────────
+  noResults:     { paddingVertical: spacing.xl, alignItems: 'center' },
   noResultsText: { fontSize: typography.sizes.sm, color: colors.textMuted },
+  emptyTable: {
+    paddingVertical: spacing.xxl,
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  emptyTableText: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.medium,
+    color: colors.textLabel,
+  },
+  emptyTableSub: {
+    fontSize: typography.sizes.xs,
+    color: colors.textLabel,
+    textAlign: 'center',
+    marginTop: 2,
+  },
 
-  // Input row
+  // ── In-table Grand Total row ─────────────────────────────
+  tableTotalRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.bgSurface,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderLight,
+  },
+  tableTotalLabel: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.bold,
+    color: colors.textMuted,
+    letterSpacing: 0.8,
+  },
+  tableTotalAmount: {
+    fontSize: typography.sizes.md,
+    fontWeight: typography.weights.bold,
+    color: colors.textPrimary,
+    letterSpacing: -0.3,
+    textAlign: 'right',
+    flexShrink: 0,
+    paddingLeft: spacing.sm,
+  },
+
+  // ── Input row — fixed below ScrollView ───────────────────
   inputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: spacing.sm,
+    paddingVertical: 11,
     paddingHorizontal: spacing.md,
     backgroundColor: colors.accent,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.2)',
+  },
+  inputIndex: {
+    width: COL_NO,
+    color: 'rgba(255,255,255,0.7)',
   },
   inputCell: {
     fontSize: typography.sizes.base,
+    fontWeight: typography.weights.bold,
     color: colors.white,
     paddingVertical: spacing.xs,
     paddingHorizontal: spacing.xs,
   },
-  inputIndex: { width: COL_NO },
   amountInput: { textAlign: 'right' },
 
-  // Shared
+  // ── Input row button cluster (+ and camera) ───────────────
+  inputBtnCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  inputClusterBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 4,
+  },
+
+  // Enter button sits between Description and Amount fields
+  inputCenterBtn: {
+    width: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 2,
+  },
+
+  // ── Expanded extras panel (note + photo) ───────────────────
+  extrasPanel: {
+    backgroundColor: colors.accent,
+    paddingHorizontal: spacing.md,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.md,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.18)',
+  },
+  extrasRow: {
+    backgroundColor: 'rgba(255,255,255,0.13)',
+    borderRadius: radius.sm,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 6,
+    marginBottom: spacing.sm,
+  },
+  noteInput: {
+    fontSize: typography.sizes.sm,
+    color: colors.white,
+    minHeight: 32,
+    maxHeight: 96,
+    padding: 0,
+  },
+  extrasActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
+  extraPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(255,255,255,0.18)',
+    borderRadius: radius.full,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 6,
+  },
+  extraPillText: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.semibold,
+    color: colors.white,
+    letterSpacing: 0.2,
+  },
+  thumbWrap: { position: 'relative' },
+  thumb: {
+    width: 48,
+    height: 48,
+    borderRadius: radius.sm,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+  },
+  thumbRemove: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: colors.textPrimary,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+  // ── Shared ────────────────────────────────────────────────────
   grow: { flex: 1 },
 
-  // ── Grand Total ─────────────────────────────────────────────
+  // ── Grand total ──────────────────────────────────────────────
   totalRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.base,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
+    marginHorizontal: spacing.base,
+    marginTop: spacing.xs,
+    backgroundColor: colors.bgCard,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.borderLight,
   },
   totalLabel: {
     fontSize: typography.sizes.sm,
@@ -679,8 +1193,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: spacing.xs,
     paddingVertical: spacing.xs,
-    borderTopWidth: 1,
-    borderTopColor: colors.borderLight,
+    marginHorizontal: spacing.base,
   },
   kbDismissText: {
     fontSize: typography.sizes.xs,
@@ -688,12 +1201,13 @@ const styles = StyleSheet.create({
     fontWeight: typography.weights.medium,
   },
 
-  // ── Subtotal (search) ────────────────────────────────────────
+  // ── Subtotal (search mode) ───────────────────────────────────
   subtotalCard: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: spacing.base,
+    marginHorizontal: spacing.base,
+    marginTop: spacing.xs,
     backgroundColor: colors.bgCard,
     borderRadius: radius.lg,
     borderWidth: 1,
