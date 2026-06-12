@@ -11,8 +11,9 @@ import { colors, typography, spacing, radius } from '@/constants/theme';
 import { Currency } from '@/types';
 
 export default function SettingsScreen() {
-  const currency    = useStore(s => s.currency);
-  const setCurrency = useStore(s => s.setCurrency);
+  const currency      = useStore(s => s.currency);
+  const setCurrency   = useStore(s => s.setCurrency);
+  const deletedFiles  = useStore(s => s.deletedFiles);
 
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
 
@@ -41,7 +42,7 @@ export default function SettingsScreen() {
 
       <View style={styles.body}>
 
-        {/* Currency */}
+        {/* Preferences */}
         <Text style={styles.sectionLabel}>PREFERENCES</Text>
         <View style={styles.card}>
           <TouchableOpacity style={styles.row} onPress={() => setShowCurrencyPicker(true)} activeOpacity={0.7}>
@@ -58,7 +59,32 @@ export default function SettingsScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* App info */}
+        {/* Data */}
+        <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>DATA</Text>
+        <View style={styles.card}>
+          <TouchableOpacity
+            style={[styles.row, { borderBottomWidth: 0 }]}
+            onPress={() => router.push('/recently-deleted')}
+            activeOpacity={0.7}
+          >
+            <View style={styles.rowLeft}>
+              <View style={[styles.iconWrap, { backgroundColor: '#FFF1F0' }]}>
+                <Ionicons name="trash-outline" size={18} color={colors.danger} />
+              </View>
+              <Text style={styles.rowTitle}>Recently Deleted</Text>
+            </View>
+            <View style={styles.rowRight}>
+              {deletedFiles.length > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{deletedFiles.length}</Text>
+                </View>
+              )}
+              <Ionicons name="chevron-forward" size={18} color={colors.textMuted} />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* About */}
         <Text style={[styles.sectionLabel, { marginTop: spacing.xl }]}>ABOUT</Text>
         <View style={styles.card}>
           <View style={[styles.row, { borderBottomWidth: 0 }]}>
@@ -135,6 +161,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.md,
   },
+  rowRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.sm,
+  },
   iconWrap: {
     width: 36,
     height: 36,
@@ -161,5 +192,19 @@ const styles = StyleSheet.create({
   rowValue: {
     fontSize: typography.sizes.sm,
     color: colors.textMuted,
+  },
+  badge: {
+    backgroundColor: colors.danger,
+    borderRadius: radius.full,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 5,
+  },
+  badgeText: {
+    fontSize: 10,
+    fontWeight: typography.weights.bold,
+    color: colors.white,
   },
 });

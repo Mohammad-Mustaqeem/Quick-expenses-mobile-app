@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -23,21 +23,22 @@ import { colors, typography, spacing, radius } from '@/constants/theme';
 import { Currency } from '@/types';
 
 export default function HomeScreen() {
-  const files          = useStore(s => s.files);
-  const deletedFiles   = useStore(s => s.deletedFiles);
-  const addFile        = useStore(s => s.addFile);
-  const setCurrency    = useStore(s => s.setCurrency);
-  const currency       = useStore(s => s.currency);
-  const showOnLaunch   = useStore(s => s.showCurrencyPickerOnLaunch);
+  const files           = useStore(s => s.files);
+  const addFile         = useStore(s => s.addFile);
+  const setCurrency     = useStore(s => s.setCurrency);
+  const currency        = useStore(s => s.currency);
+  const showOnLaunch    = useStore(s => s.showCurrencyPickerOnLaunch);
   const markPickerShown = useStore(s => s.markCurrencyPickerShown);
 
-  const [showModal, setShowModal] = useState(false);
-  const [name, setName] = useState('');
-  const [query, setQuery] = useState('');
+  const [showModal, setShowModal]             = useState(false);
+  const [name, setName]                       = useState('');
+  const [query, setQuery]                     = useState('');
+  const [searchOpen, setSearchOpen]           = useState(false);
   const [showCurrencyPicker, setShowCurrencyPicker] = useState(false);
-  const [isFirstLaunch, setIsFirstLaunch] = useState(false);
+  const [isFirstLaunch, setIsFirstLaunch]     = useState(false);
 
-  // Show currency picker on first launch
+  const searchRef = useRef<TextInput>(null);
+
   useEffect(() => {
     if (showOnLaunch) {
       setIsFirstLaunch(true);
@@ -45,6 +46,16 @@ export default function HomeScreen() {
       markPickerShown();
     }
   }, [showOnLaunch]);
+
+  const toggleSearch = () => {
+    if (searchOpen) {
+      setQuery('');
+      setSearchOpen(false);
+    } else {
+      setSearchOpen(true);
+      setTimeout(() => searchRef.current?.focus(), 50);
+    }
+  };
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -70,6 +81,19 @@ export default function HomeScreen() {
     }
   };
 
+  const AddFileCard = () => (
+    <TouchableOpacity
+      style={styles.addCard}
+      onPress={() => setShowModal(true)}
+      activeOpacity={0.75}
+    >
+      <View style={styles.addCardIcon}>
+        <Ionicons name="add-circle-outline" size={22} color={colors.textMuted} />
+      </View>
+      <Text style={styles.addCardText}>Add new file</Text>
+    </TouchableOpacity>
+  );
+
   return (
     <SafeAreaView style={styles.safe}>
 
@@ -83,82 +107,75 @@ export default function HomeScreen() {
           />
           <Text style={styles.title}>QuickExpenses</Text>
         </View>
-        <TouchableOpacity
-          onPress={() => router.push('/settings')}
-          style={styles.iconBtn}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
-        </TouchableOpacity>
-      </View>
-
-      {/* ── Search bar ── */}
-      <View style={styles.searchWrap}>
-        <Ionicons name="search-outline" size={16} color={colors.textMuted} style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          value={query}
-          onChangeText={setQuery}
-          placeholder="Search files…"
-          placeholderTextColor={colors.textLabel}
-          returnKeyType="search"
-          clearButtonMode="while-editing"
-        />
-        {query.length > 0 && Platform.OS === 'android' && (
-          <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-            <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+        <View style={styles.headerRight}>
+          <TouchableOpacity
+            onPress={toggleSearch}
+            style={styles.iconBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons
+              name={searchOpen ? 'close-outline' : 'search-outline'}
+              size={22}
+              color={searchOpen ? colors.accent : colors.textPrimary}
+            />
           </TouchableOpacity>
-        )}
+          <TouchableOpacity
+            onPress={() => router.push('/settings')}
+            style={styles.iconBtn}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
+            <Ionicons name="settings-outline" size={22} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {/* ── Recently Deleted row ── */}
-      <TouchableOpacity
-        style={styles.deletedRow}
-        onPress={() => router.push('/recently-deleted')}
-        activeOpacity={0.7}
-      >
-        <Ionicons name="trash-outline" size={15} color={colors.textMuted} />
-        <Text style={styles.deletedText}>Recently Deleted</Text>
-        {deletedFiles.length > 0 && (
-          <View style={styles.badge}>
-            <Text style={styles.badgeText}>{deletedFiles.length}</Text>
-          </View>
-        )}
-        <Ionicons name="chevron-forward" size={14} color={colors.textLabel} style={{ marginLeft: 'auto' }} />
-      </TouchableOpacity>
-
-      {/* ── File list ── */}
-      {files.length === 0 ? (
-        <EmptyState
-          icon="folder-open-outline"
-          title="No expense files"
-          subtitle="Tap + to create a file and start tracking your expenses"
-        />
-      ) : filtered.length === 0 ? (
-        <EmptyState
-          icon="search-outline"
-          title="No results"
-          subtitle={`No files match "${query}"`}
-        />
-      ) : (
-        <FlatList
-          data={filtered}
-          keyExtractor={item => item.id}
-          renderItem={({ item }) => <FileCard file={item} />}
-          contentContainerStyle={styles.list}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-        />
+      {/* ── Collapsible search bar ── */}
+      {searchOpen && (
+        <View style={styles.searchWrap}>
+          <Ionicons name="search-outline" size={16} color={colors.textMuted} style={styles.searchIcon} />
+          <TextInput
+            ref={searchRef}
+            style={styles.searchInput}
+            value={query}
+            onChangeText={setQuery}
+            placeholder="Search files…"
+            placeholderTextColor={colors.textLabel}
+            returnKeyType="search"
+            clearButtonMode="while-editing"
+          />
+          {query.length > 0 && Platform.OS === 'android' && (
+            <TouchableOpacity onPress={() => setQuery('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+              <Ionicons name="close-circle" size={16} color={colors.textMuted} />
+            </TouchableOpacity>
+          )}
+        </View>
       )}
 
-      {/* ── Floating action button ── */}
-      <TouchableOpacity
-        style={styles.fab}
-        onPress={() => setShowModal(true)}
-        activeOpacity={0.85}
-      >
-        <Ionicons name="add" size={28} color={colors.white} />
-      </TouchableOpacity>
+      {/* ── File list ── */}
+      <FlatList
+        data={filtered}
+        keyExtractor={item => item.id}
+        renderItem={({ item }) => <FileCard file={item} />}
+        contentContainerStyle={styles.list}
+        showsVerticalScrollIndicator={false}
+        keyboardShouldPersistTaps="handled"
+        ListHeaderComponent={<AddFileCard />}
+        ListEmptyComponent={
+          searchOpen && query.trim() ? (
+            <EmptyState
+              icon="search-outline"
+              title="No results"
+              subtitle={`No files match "${query}"`}
+            />
+          ) : (
+            <EmptyState
+              icon="folder-open-outline"
+              title="No expense files"
+              subtitle="Tap 'Add new file' above to get started"
+            />
+          )
+        }
+      />
 
       {/* ── New file modal ── */}
       <Modal visible={showModal} transparent animationType="fade" onRequestClose={closeModal}>
@@ -193,7 +210,7 @@ export default function HomeScreen() {
         </Pressable>
       </Modal>
 
-      {/* ── Currency picker (first-launch + settings) ── */}
+      {/* ── Currency picker ── */}
       <CurrencyPicker
         visible={showCurrencyPicker}
         selectedCode={currency.code}
@@ -223,7 +240,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: spacing.sm,
   },
-  logo: { width: 36, height: 36, borderRadius: 10 },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.xs,
+  },
+  logo:  { width: 36, height: 36, borderRadius: 10 },
   title: {
     fontSize: typography.sizes.xxl,
     fontWeight: typography.weights.bold,
@@ -245,7 +267,7 @@ const styles = StyleSheet.create({
     borderColor: colors.borderLight,
     height: 42,
   },
-  searchIcon: { marginRight: spacing.sm },
+  searchIcon:  { marginRight: spacing.sm },
   searchInput: {
     flex: 1,
     fontSize: typography.sizes.base,
@@ -253,60 +275,36 @@ const styles = StyleSheet.create({
     paddingVertical: 0,
   },
 
-  // ── Recently Deleted row ─────────────────────────────────────
-  deletedRow: {
+  // ── Add new file card ────────────────────────────────────────
+  addCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: spacing.sm,
-    marginHorizontal: spacing.base,
-    marginBottom: spacing.md,
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
+    gap: spacing.md,
     backgroundColor: colors.bgCard,
-    borderRadius: radius.md,
-    borderWidth: 1,
+    borderRadius: radius.lg,
+    borderWidth: 1.5,
     borderColor: colors.borderLight,
+    borderStyle: 'dashed',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.sm,
   },
-  deletedText: {
-    fontSize: typography.sizes.sm,
-    color: colors.textMuted,
-    fontWeight: typography.weights.medium,
-  },
-  badge: {
-    backgroundColor: colors.danger,
-    borderRadius: radius.full,
-    minWidth: 18,
-    height: 18,
+  addCardIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: radius.md,
+    backgroundColor: colors.bgSurface,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 5,
   },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: typography.weights.bold,
-    color: colors.white,
+  addCardText: {
+    fontSize: typography.sizes.base,
+    fontWeight: typography.weights.medium,
+    color: colors.textMuted,
   },
 
   // ── List ─────────────────────────────────────────────────────
-  list: { paddingHorizontal: spacing.base, paddingBottom: 96 },
-
-  // ── FAB ──────────────────────────────────────────────────────
-  fab: {
-    position: 'absolute',
-    bottom: 72,
-    right: spacing.base + 4,
-    width: 56,
-    height: 56,
-    borderRadius: radius.full,
-    backgroundColor: colors.textPrimary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 6,
-  },
+  list: { paddingHorizontal: spacing.base, paddingBottom: 32, paddingTop: spacing.sm },
 
   // ── Modal ─────────────────────────────────────────────────────
   overlay: {
@@ -316,7 +314,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: spacing.base,
   },
-  kav: { width: '100%', maxWidth: 400 },
+  kav:    { width: '100%', maxWidth: 400 },
   dialog: {
     backgroundColor: colors.bgCard,
     borderRadius: radius.xl,
@@ -344,7 +342,7 @@ const styles = StyleSheet.create({
     fontSize: typography.sizes.base,
     color: colors.textPrimary,
   },
-  buttons: { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xl },
+  buttons:   { flexDirection: 'row', gap: spacing.sm, marginTop: spacing.xl },
   cancelBtn: {
     flex: 1,
     backgroundColor: colors.bgSurface,
