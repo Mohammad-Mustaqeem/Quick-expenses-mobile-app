@@ -1,8 +1,9 @@
 import React, { useState, useMemo } from 'react';
 import {
-  View, Text, Modal, Pressable, FlatList, TextInput,
-  TouchableOpacity, StyleSheet, SafeAreaView,
+  View, Text, Modal, FlatList, TextInput,
+  TouchableOpacity, StyleSheet,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Currency } from '../types';
 import { CURRENCIES } from '../constants/currencies';

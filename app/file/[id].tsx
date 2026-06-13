@@ -15,6 +15,8 @@ import {
   Image,
   Pressable,
   TouchableWithoutFeedback,
+  LayoutAnimation,
+  UIManager,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useLocalSearchParams, router } from 'expo-router';
@@ -30,6 +32,14 @@ import { exportToPDF, exportToCSV } from '@/services/export';
 import { deleteAttachment } from '@/services/attachments';
 import { pickPhoto, PhotoSource } from '@/services/photoPicker';
 import { Expense } from '@/types';
+
+// LayoutAnimation needs to be opted-in on old-architecture Android.
+if (
+  Platform.OS === 'android' &&
+  UIManager.setLayoutAnimationEnabledExperimental
+) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 // ── Column widths ─────────────────────────────────────────────
 const COL_NO     = 36;
@@ -204,16 +214,56 @@ export default function FileScreen() {
     return () => clearTimeout(timer);
   }, []);
 
+  // Mirror the draft photo so the unmount cleanup can read its latest value
+  // without re-subscribing the effect on every photo change.
+  const photoUriRef = useRef<string | null>(null);
+  useEffect(() => { photoUriRef.current = photoUri; }, [photoUri]);
+
+  // On unmount: drop any never-saved draft photo (handleAdd nulls photoUri
+  // after saving, so an attached entry's photo is never touched here), and
+  // commit any still-pending delete instead of leaving a dangling timer that
+  // would call setState on an unmounted component.
+  useEffect(() => {
+    return () => {
+      if (undoTimerRef.current) clearTimeout(undoTimerRef.current);
+
+      const draft = photoUriRef.current;
+      const latest = id ? useStore.getState().getFile(id) : undefined;
+      // Only drop the draft photo if it isn't already attached to a saved
+      // expense (guards the brief window right after a successful add).
+      if (draft && !latest?.expenses.some(e => e.photoUri === draft)) {
+        deleteAttachment(draft);
+      }
+
+      const expId = pendingDeleteRef.current;
+      if (expId && id) {
+        const target = latest?.expenses.find(e => e.id === expId);
+        useStore.getState().deleteExpense(id, expId);
+        if (target?.photoUri) deleteAttachment(target.photoUri);
+      }
+    };
+  }, []);
+
   useEffect(() => {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    // Animate every padding change so the input row glides with the keyboard
+    // instead of snapping into place after it (the "jump" on release builds).
+    const animatePad = (next: number) => {
+      LayoutAnimation.configureNext({
+        duration: 220,
+        update: { type: LayoutAnimation.Types.easeInEaseOut },
+      });
+      setKeyboardPad(next);
+    };
 
     const show = Keyboard.addListener(showEvt, (e) => {
       setKeyboardVisible(true);
       if (Platform.OS === 'ios') {
         // iOS never resizes the window — lift by the full keyboard frame
         // (it already includes the suggestion bar + home indicator).
-        setKeyboardPad(e.endCoordinates?.height ?? 0);
+        animatePad(e.endCoordinates?.height ?? 0);
       } else {
         // Android: depending on edge-to-edge / adjustResize the OS may have
         // already shrunk the window — or not at all. Instead of guessing,
@@ -222,19 +272,23 @@ export default function FileScreen() {
         // build regardless of softwareKeyboardLayoutMode.
         const keyboardTop = e.endCoordinates?.screenY ?? 0;
         setTimeout(() => {
-          kavRef.current?.measureInWindow((_x, y, _w, h) => {
-            if (keyboardTop > 0) {
-              setKeyboardPad(Math.max(0, y + h - keyboardTop));
-            } else {
-              setKeyboardPad(e.endCoordinates?.height ?? 0);
-            }
-          });
-        }, 60); // let any native window resize settle before measuring
+          if (kavRef.current) {
+            kavRef.current.measureInWindow((_x, y, _w, h) => {
+              if (keyboardTop > 0) {
+                animatePad(Math.max(0, y + h - keyboardTop));
+              } else {
+                animatePad(e.endCoordinates?.height ?? 0);
+              }
+            });
+          } else {
+            animatePad(e.endCoordinates?.height ?? 0);
+          }
+        }, 40); // let any native window resize settle before measuring
       }
     });
     const hide = Keyboard.addListener(hideEvt, () => {
       setKeyboardVisible(false);
-      setKeyboardPad(0);
+      animatePad(0);
     });
     return () => { show.remove(); hide.remove(); };
   }, []);
@@ -334,7 +388,12 @@ export default function FileScreen() {
     setNote('');
     setPhotoUri(null);
     setExtrasOpen(false);
-    setTimeout(() => particularRef.current?.focus(), 50);
+    // The amount field uses blurOnSubmit={false}, so the keyboard never
+    // dismisses between entries — we just hand focus back to the description
+    // field on the next frame (after the state-clearing render flushes).
+    // requestAnimationFrame is deterministic across debug and release builds,
+    // unlike a fixed setTimeout that races the keyboard animation.
+    requestAnimationFrame(() => particularRef.current?.focus());
   };
 
   const attachPhoto = async (source: PhotoSource) => {
@@ -677,6 +736,7 @@ export default function FileScreen() {
                 selectionColor={colors.white}
                 keyboardType="decimal-pad"
                 returnKeyType="done"
+                blurOnSubmit={false}
                 onSubmitEditing={handleAdd}
               />
 
