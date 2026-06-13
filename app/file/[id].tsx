@@ -778,6 +778,19 @@ export default function FileScreen() {
           {/* ── Expanded extras panel — note only ── */}
           {!isSearching && extrasOpen && (
             <View style={styles.extrasPanel}>
+              {/* Note has a multiline keyboard, so the return key inserts a
+                  newline instead of dismissing — this Done button closes it. */}
+              <View style={styles.extrasHeader}>
+                <Text style={styles.extrasLabel}>NOTE</Text>
+                <TouchableOpacity
+                  onPress={() => Keyboard.dismiss()}
+                  hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done editing note"
+                >
+                  <Text style={styles.extrasDone}>Done</Text>
+                </TouchableOpacity>
+              </View>
               <View style={styles.extrasRow}>
                 <TextInput
                   ref={noteRef}
@@ -1161,6 +1174,23 @@ const styles = StyleSheet.create({
     paddingBottom: spacing.md,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255,255,255,0.18)',
+  },
+  extrasHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingBottom: 4,
+  },
+  extrasLabel: {
+    fontSize: typography.sizes.xs,
+    fontWeight: typography.weights.semibold,
+    color: 'rgba(255,255,255,0.7)',
+    letterSpacing: 0.8,
+  },
+  extrasDone: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.bold,
+    color: colors.white,
   },
   extrasRow: {
     backgroundColor: 'rgba(255,255,255,0.13)',

@@ -7,6 +7,7 @@ import {
   Modal,
   StyleSheet,
   KeyboardAvoidingView,
+  Keyboard,
   Platform,
   Pressable,
   Image,
@@ -130,7 +131,19 @@ export function ExpenseForm({ visible, editingExpense, onSubmit, onClose }: Prop
                 returnKeyType="done"
               />
 
-              <Text style={styles.label}>Note</Text>
+              <View style={styles.noteLabelRow}>
+                <Text style={styles.label}>Note</Text>
+                {/* Multiline keyboard's return key inserts a newline, so a
+                    Done button is the only way to dismiss it on both platforms. */}
+                <TouchableOpacity
+                  onPress={() => Keyboard.dismiss()}
+                  hitSlop={{ top: 8, bottom: 8, left: 10, right: 10 }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Done editing note"
+                >
+                  <Text style={styles.noteDone}>Done</Text>
+                </TouchableOpacity>
+              </View>
               <TextInput
                 style={[styles.input, styles.noteInput]}
                 value={note}
@@ -237,6 +250,17 @@ const styles = StyleSheet.create({
   noteInput: {
     minHeight: 64,
     textAlignVertical: 'top',
+  },
+  noteLabelRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+  },
+  noteDone: {
+    fontSize: typography.sizes.sm,
+    fontWeight: typography.weights.semibold,
+    color: colors.accent,
+    marginBottom: spacing.xs,
   },
   pickerRow: {
     flexDirection: 'row',
