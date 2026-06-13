@@ -7,6 +7,7 @@ const KEYS = {
   deletedFiles: '@quickexpenses/deleted_files',
   currency:     '@quickexpenses/currency',
   firstLaunch:  '@quickexpenses/first_launch',
+  seeded:       '@quickexpenses/seeded',
 } as const;
 
 // ── Files ────────────────────────────────────────────────────────
@@ -84,6 +85,24 @@ export async function isFirstLaunch(): Promise<boolean> {
 export async function markLaunched(): Promise<void> {
   try {
     await AsyncStorage.setItem(KEYS.firstLaunch, '1');
+  } catch { /* non-critical */ }
+}
+
+// ── Default-files seeding flag ───────────────────────────────────
+// Kept separate from firstLaunch so installs that launched an earlier
+// build (before seeding existed) still get the starter files once. Once
+// set, the defaults are never re-seeded — so deleting them sticks.
+export async function hasSeeded(): Promise<boolean> {
+  try {
+    return (await AsyncStorage.getItem(KEYS.seeded)) !== null;
+  } catch {
+    return true; // on error, don't risk duplicate seeding
+  }
+}
+
+export async function markSeeded(): Promise<void> {
+  try {
+    await AsyncStorage.setItem(KEYS.seeded, '1');
   } catch { /* non-critical */ }
 }
 

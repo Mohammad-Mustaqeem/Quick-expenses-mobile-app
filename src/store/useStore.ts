@@ -5,6 +5,7 @@ import {
   loadDeletedFiles, saveDeletedFiles,
   loadCurrency, saveCurrency,
   isFirstLaunch, markLaunched,
+  hasSeeded, markSeeded,
 } from '../services/storage';
 import { deleteAttachment } from '../services/attachments';
 import { DEFAULT_CURRENCY } from '../constants/currencies';
@@ -67,11 +68,12 @@ export const useStore = create<StoreState>((set, get) => ({
   showCurrencyPickerOnLaunch: false,
 
   loadData: async () => {
-    const [files, allDeletedFiles, currency, firstLaunch] = await Promise.all([
+    const [files, allDeletedFiles, currency, firstLaunch, seeded] = await Promise.all([
       loadFiles(),
       loadDeletedFiles(),
       loadCurrency(),
       isFirstLaunch(),
+      hasSeeded(),
     ]);
 
     // 30-day retention: prune expired entries from Recently Deleted and
@@ -87,17 +89,21 @@ export const useStore = create<StoreState>((set, get) => ({
       saveDeletedFiles(deletedFiles);
     }
 
-    // Seed two starter files on the very first launch, only if nothing
-    // is stored yet. Subsequent launches never re-seed, so the user can
-    // freely delete them without them coming back.
+    // Seed two starter files exactly once, if the install has no files yet.
+    // Tracked by its own flag (not firstLaunch) so installs that already
+    // launched an earlier build still get them. Once seeded, they never come
+    // back — deleting them sticks.
     let seededFiles = files;
-    if (firstLaunch && files.length === 0) {
-      const now = new Date().toISOString();
-      seededFiles = [
-        { id: uid(), name: 'Expense 1', expenses: [], createdAt: now, updatedAt: now },
-        { id: uid(), name: 'Expense 2', expenses: [], createdAt: now, updatedAt: now },
-      ];
-      saveFiles(seededFiles);
+    if (!seeded) {
+      markSeeded(); // fire-and-forget; don't await
+      if (files.length === 0) {
+        const now = new Date().toISOString();
+        seededFiles = [
+          { id: uid(), name: 'Expense 1', expenses: [], createdAt: now, updatedAt: now },
+          { id: uid(), name: 'Expense 2', expenses: [], createdAt: now, updatedAt: now },
+        ];
+        saveFiles(seededFiles);
+      }
     }
 
     if (firstLaunch) markLaunched(); // fire-and-forget; don't await
