@@ -204,10 +204,7 @@ export default function FileScreen() {
   const pendingDeleteRef = useRef<string | null>(null);
 
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [keyboardPad, setKeyboardPad]         = useState(0);
-  // Ref to the container we pad — used on Android to measure how much the
-  // keyboard actually overlaps it (see keyboard listener below).
-  const kavRef = useRef<View>(null);
+  const [keyboardHeight, setKeyboardHeight]   = useState(0);
 
   useEffect(() => {
     const timer = setTimeout(() => particularRef.current?.focus(), 350);
@@ -248,47 +245,29 @@ export default function FileScreen() {
     const showEvt = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvt = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
 
-    // Animate every padding change so the input row glides with the keyboard
+    // Animate padding changes so the input row glides with the keyboard
     // instead of snapping into place after it (the "jump" on release builds).
-    const animatePad = (next: number) => {
+    const animate = () =>
       LayoutAnimation.configureNext({
         duration: 220,
         update: { type: LayoutAnimation.Types.easeInEaseOut },
       });
-      setKeyboardPad(next);
-    };
 
     const show = Keyboard.addListener(showEvt, (e) => {
+      // Pad by the full keyboard frame. The screen draws edge-to-edge (Expo
+      // SDK 54 default on Android, always on iOS), so the window does NOT
+      // resize for the keyboard — the only thing lifting the input row above
+      // it is this padding. Using the reported height directly is reliable on
+      // every device; the old measure-on-a-timer approach was fooled by
+      // edge-to-edge into computing ~0 and left the row hidden.
+      animate();
       setKeyboardVisible(true);
-      if (Platform.OS === 'ios') {
-        // iOS never resizes the window — lift by the full keyboard frame
-        // (it already includes the suggestion bar + home indicator).
-        animatePad(e.endCoordinates?.height ?? 0);
-      } else {
-        // Android: depending on edge-to-edge / adjustResize the OS may have
-        // already shrunk the window — or not at all. Instead of guessing,
-        // measure the REAL overlap between this container's bottom edge and
-        // the top of the keyboard, and pad exactly that much. Works on every
-        // build regardless of softwareKeyboardLayoutMode.
-        const keyboardTop = e.endCoordinates?.screenY ?? 0;
-        setTimeout(() => {
-          if (kavRef.current) {
-            kavRef.current.measureInWindow((_x, y, _w, h) => {
-              if (keyboardTop > 0) {
-                animatePad(Math.max(0, y + h - keyboardTop));
-              } else {
-                animatePad(e.endCoordinates?.height ?? 0);
-              }
-            });
-          } else {
-            animatePad(e.endCoordinates?.height ?? 0);
-          }
-        }, 40); // let any native window resize settle before measuring
-      }
+      setKeyboardHeight(e.endCoordinates?.height ?? 0);
     });
     const hide = Keyboard.addListener(hideEvt, () => {
+      animate();
       setKeyboardVisible(false);
-      animatePad(0);
+      setKeyboardHeight(0);
     });
     return () => { show.remove(); hide.remove(); };
   }, []);
@@ -508,7 +487,7 @@ export default function FileScreen() {
 
   // ── Render ────────────────────────────────────────────────────
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
     <TouchableWithoutFeedback onPress={Keyboard.dismiss} accessible={false}>
     <View style={styles.body}>
 
@@ -589,24 +568,19 @@ export default function FileScreen() {
       </View>
 
       {/*
-        Bottom spacing — keyboardPad is computed in the keyboard listener:
-        • iOS → full keyboard frame height (window never resizes).
-        • Android → the MEASURED overlap between this container and the
-          keyboard, taken after any native window resize has settled. If the
-          OS already resized (adjustResize active) the overlap is ~0; if
-          edge-to-edge suppressed the resize, the overlap is the keyboard
-          height. Either way the input row ends up exactly above the keyboard
-          with no gap and no clipping.
-        • Keyboard closed → bottom safe-area inset so the input row clears
-          the Android nav bar / iOS home indicator.
-        Note: padding is inside this container, so it does not change the
-        container's own window bounds — the measurement never feedback-loops.
+        Bottom spacing:
+        • Keyboard open  → full keyboard height, lifting the input row to sit
+          right on top of the keyboard. The screen draws edge-to-edge so the
+          window never resizes; this padding is what does the lifting. The
+          SafeAreaView excludes the bottom edge, so the container reaches the
+          true screen bottom and `keyboardHeight` is the exact distance needed.
+        • Keyboard closed → bottom safe-area inset so the input row clears the
+          Android nav bar / iOS home indicator.
       */}
       <View
-        ref={kavRef}
         style={[
           styles.kav,
-          { paddingBottom: keyboardVisible ? keyboardPad : insets.bottom },
+          { paddingBottom: keyboardVisible ? keyboardHeight : insets.bottom },
         ]}
       >
 
